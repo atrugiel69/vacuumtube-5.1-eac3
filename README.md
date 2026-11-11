@@ -17,6 +17,8 @@ This repository provides:
 
 ## Quick Installation (Pre-built Binaries)
 
+Instructions are provided "as is", with no guarantee of support. If you try this, you are on your own.
+
 ### 1. Download & Extract
 Download `vacuumtube-5.1-eac3-binaries.tar.gz` from the latest Release and copy it to your LibreELEC machine:
 
