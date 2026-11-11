@@ -1,0 +1,106 @@
+diff --git a/media/base/supported_types.cc b/media/base/supported_types.cc
+index 90e3bdabfed94..b4d80cdc093d3 100644
+--- a/media/base/supported_types.cc
++++ b/media/base/supported_types.cc
+@@ -317,18 +317,7 @@ bool IsDecoderDolbyVisionProfileSupported(const VideoType& type) {
+ }
+ 
+ bool IsDecoderDolbyAc3Eac3Supported(const AudioType& type) {
+-#if BUILDFLAG(ENABLE_PLATFORM_AC3_EAC3_AUDIO)
+-#if BUILDFLAG(ENABLE_MOJO_AUDIO_DECODER) && \
+-    (BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC))
+-  return GetSupplementalDecoderAudioTypeCache()->IsProfileSupported(type);
+-#else
+-  // Keep 'true' for other platforms as old code snippet.
+   return true;
+-#endif  // BUILDFLAG(ENABLE_MOJO_AUDIO_DECODER) && (BUILDFLAG(IS_WIN) ||
+-        // BUILDFLAG(IS_MAC))
+-#else
+-  return false;
+-#endif  // BUILDFLAG(ENABLE_PLATFORM_AC3_EAC3_AUDIO)
+ }
+ 
+ bool IsDecoderDolbyAc4Supported(const AudioType& type) {
+diff --git a/media/ffmpeg/ffmpeg_common.cc b/media/ffmpeg/ffmpeg_common.cc
+index 280dce68853c1..b846aafd5165a 100644
+--- a/media/ffmpeg/ffmpeg_common.cc
++++ b/media/ffmpeg/ffmpeg_common.cc
+@@ -185,6 +185,12 @@ AVCodecID AudioCodecToCodecID(AudioCodec audio_codec,
+   switch (audio_codec) {
+     case AudioCodec::kAAC:
+       return AV_CODEC_ID_AAC;
++#if BUILDFLAG(ENABLE_PLATFORM_AC3_EAC3_AUDIO)
++    case AudioCodec::kAC3:
++      return AV_CODEC_ID_AC3;
++    case AudioCodec::kEAC3:
++      return AV_CODEC_ID_EAC3;
++#endif
+     case AudioCodec::kALAC:
+       return AV_CODEC_ID_ALAC;
+     case AudioCodec::kMP3:
+@@ -397,14 +403,20 @@ bool AVCodecContextToAudioDecoderConfig(const AVCodecContext* codec_context,
+   }
+ 
+   switch (codec) {
+-    // For AC3/EAC3 we enable only demuxing, but not decoding, so FFmpeg does
+-    // not fill |sample_fmt|.
+     case AudioCodec::kAC3:
+     case AudioCodec::kEAC3:
+ #if BUILDFLAG(ENABLE_PLATFORM_AC3_EAC3_AUDIO)
+-      // The spec for AC3/EAC3 audio is ETSI TS 102 366. According to sections
+-      // F.3.1 and F.5.1 in that spec the sample_format for AC3/EAC3 must be 16.
+-      sample_format = kSampleFormatS16;
++      // Upstream builds ffmpeg with the AC3/EAC3 demuxers but not the
++      // decoders, so ffmpeg leaves |sample_fmt| unset and the bitstream is
++      // described as the 16-bit its spec (ETSI TS 102 366 F.3.1, F.5.1)
++      // requires before being handed to a platform decoder. We build the
++      // decoders, so ffmpeg does fill |sample_fmt| -- with planar float, from
++      // ff_ac3_decoder -- and that is what the decoded buffers will hold.
++      // Describing them as S16 is simply wrong, so keep what ffmpeg reports
++      // and fall back to upstream's value only when it reports nothing.
++      if (sample_format == kUnknownSampleFormat) {
++        sample_format = kSampleFormatS16;
++      }
+       break;
+ #else
+       NOTREACHED();
+@@ -460,10 +472,14 @@ bool AVCodecContextToAudioDecoderConfig(const AVCodecContext* codec_context,
+                      seek_preroll, codec_delay);
+ 
+ #if BUILDFLAG(ENABLE_PLATFORM_AC3_EAC3_AUDIO)
+-  // These are bitstream formats unknown to ffmpeg, so they don't have
+-  // a known sample format size.
+-  if (codec == AudioCodec::kAC3 || codec == AudioCodec::kEAC3)
++  // A bitstream ffmpeg only demuxes has no sample format, so the
++  // bytes_per_channel check at the end of this function cannot be made. When
++  // the decoder is built in, ffmpeg does report one and the check applies like
++  // it does to every other codec.
++  if ((codec == AudioCodec::kAC3 || codec == AudioCodec::kEAC3) &&
++      codec_context->sample_fmt == AV_SAMPLE_FMT_NONE) {
+     return true;
++  }
+ #endif
+ #if BUILDFLAG(ENABLE_PLATFORM_MPEG_H_AUDIO)
+   if (codec == AudioCodec::kMpegHAudio)
+@@ -1119,7 +1135,7 @@ int32_t HashCodecName(const char* codec_name) {
+ 
+ const char* GetAllowedAudioDecoders() {
+ #if BUILDFLAG(USE_PROPRIETARY_CODECS)
+-#define EXTRA_CODECS ",aac"
++#define EXTRA_CODECS ",aac,ac3,eac3"
+ #else
+ #define EXTRA_CODECS
+ #endif
+diff --git a/media/filters/ffmpeg_glue.cc b/media/filters/ffmpeg_glue.cc
+index 6ecbf5d8b3157..78203a2a7ae74 100644
+--- a/media/filters/ffmpeg_glue.cc
++++ b/media/filters/ffmpeg_glue.cc
+@@ -89,6 +89,8 @@ static const char* GetAllowedDemuxers() {
+                                                  "flac", "mp3",      "mov"};
+ #if BUILDFLAG(USE_PROPRIETARY_CODECS)
+     allowed_demuxers.push_back("aac");
++    allowed_demuxers.push_back("ac3");
++    allowed_demuxers.push_back("eac3");
+ #endif
+     return base::JoinString(allowed_demuxers, ",");
+   }());

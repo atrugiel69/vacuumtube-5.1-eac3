@@ -1,0 +1,2 @@
+import("//electron/build/args/release.gn")
+enable_platform_ac3_eac3_audio = true
